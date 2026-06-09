@@ -40,13 +40,9 @@ REQUEST_DELAY = 0.8  # 秒，避免反爬
 MAX_RETRY = 3
 TIME_OUT = 15
 
-# 定期报告分类（涵盖年报、半年报、一/三季度报）
-PERIODIC_REPORT_CATEGORY = (
-    "category_ndbg_szsh;"      # 年报
-    "category_bndbg_szsh;"     # 半年报
-    "category_yjdbg_szsh;"     # 一季度报
-    "category_sjdbg_szsh;"     # 三季度报
-)
+# 2025 年年报筛选
+TARGET_YEAR = "2025"
+PERIODIC_REPORT_CATEGORY = "category_ndbg_szsh;"  # 仅年报
 
 DEFAULT_HEADERS = {
     "Accept": "application/json, text/javascript, */*; q=0.9",
@@ -211,26 +207,53 @@ def fetch_latest_report(
                 result["status"] = "未查询到定期报告"
                 return result
 
-            # 过滤：有代码时严格匹配 secCode，否则匹配公司名
-            matched = []
+            # 过滤 1: 主体匹配（有代码时精确匹配 secCode，否则匹配公司名）
+            # 过滤 2: 标题必须包含目标年份以及"年度报告"关键词
+            pre_filtered = []
             for a in announcements:
                 sec_code = (a.get("secCode") or "").strip()
                 sec_name = _strip_html(a.get("secName") or "")
                 title = _strip_html(a.get("announcementTitle") or "")
+
+                body_ok = False
                 if code and sec_code == code:
-                    matched.append((a, title))
+                    body_ok = True
                 elif (not code) and company_name:
                     name = (company_name or "").strip()
                     if name and (name in sec_name or name in title):
-                        matched.append((a, title))
-            if not matched:
-                # 没有精确匹配时，取第一条（可能搜索结果已足够相关）
-                a = announcements[0]
-                title = _strip_html(a.get("announcementTitle") or "")
-                matched.append((a, title))
+                        body_ok = True
+                if not body_ok:
+                    continue
+
+                # 标题必须包含目标年份与"年度报告"
+                # （允许出现"年年度报告"这种公司名与"年度报告"直接相连的写法）
+                if TARGET_YEAR not in title:
+                    continue
+                if "年度报告" not in title:
+                    continue
+                pre_filtered.append((a, title))
+
+            # 优先挑正式的完整年报（不是"摘要", 不是英文版/外文版/H股/海外版）
+            preferred = []
+            fallback = []
+            for item in pre_filtered:
+                _, t = item
+                lowered = t.lower()
+                bad_words = ("摘要", "英文版", "摘要", "海外版", "h股", "b股",
+                              "english", "英文", "外文")
+                is_bad = any(b in lowered for b in bad_words)
+                if is_bad:
+                    fallback.append(item)
+                else:
+                    preferred.append(item)
+
+            final_list = preferred if preferred else fallback
+            if not final_list:
+                result["status"] = "未查询到 " + TARGET_YEAR + " 年年报"
+                return result
 
             # 第一条是时间最新的
-            first, clean_title = matched[0]
+            first, clean_title = final_list[0]
             adjunct = first.get("adjunctUrl", "") or ""
             ts = first.get("announcementTime", 0)
 
