@@ -210,6 +210,19 @@ async def get_result(task_id: str):
     }
 
 
+@app.get("/api/download/code")
+async def download_code():
+    """下载完整源码 ZIP 包"""
+    zip_path = Path(__file__).parent.parent / "financial_report_tool.zip"
+    if not zip_path.exists():
+        raise HTTPException(status_code=404, detail="源码包不存在")
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename="financial_report_tool.zip",
+    )
+
+
 @app.get("/api/download/{task_id}")
 async def download_result(task_id: str):
     with _tasks_lock:
